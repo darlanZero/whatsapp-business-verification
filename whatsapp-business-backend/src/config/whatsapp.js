@@ -1,7 +1,8 @@
 const whatsappConfig = {
     apiUrl: `https://graph.facebook.com/v13.0/779807591876914/messages`,
-    token: 'EAAS9EMPy0oYBPcBXBvadWXWgRD9KSiOSsTfMw2LR5bUxxEBeXajJZCuBzzw6rdenvynjV7QFqBO2nCFHpqoZApZAZBhaexPzZCLZAf9ZAWIe0TG9CkWCshFjMo2PFX9MDCU0croZAB8TNus98x2m1JNEVQRCTB1cZC1mQQlZA9n6ZAmqXLlk4M22YtqBrc2ENZA85DZC2ie42LDGPIkZBVVZAOnLVHQ3Sl53nMHYZAGU9ZC1zOIBAZA6h8sfjX0NehWnZCpKAZDZD',
+    token: 'EAAS9EMPy0oYBPZAlqI4Kk83YVlcLZBDPK7YL1zLWtsvf1H0E70r5K45aXV5yHlJSduhArgqXZAtvUkWMQRw9iYQiW89JEX0TQcli48lGnifH6O965Au2WesptQ3n9nvriRWUdjYY2kQKSkn0tn0a7cZCOlWk8sqjTfsqGZAr96CfURoGzkhNdUCVym42T7pBYS4os3BC8EdwvfpZCDL02Ay8eoBnSDfbMlS79oBdcdAtBIBuxJOAS1T7vpwgZDZD',
     phoneNumberId: '779807591876914',
+    businessAccountId: 728062833399647, // Será preenchido automaticamente
 };
 
 module.exports = whatsappConfig;

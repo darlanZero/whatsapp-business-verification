@@ -6,7 +6,11 @@
   "scripts": {
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
-    "test": "node src/utils/test_template.js"
+    "test": "node src/utils/test_template.js",
+    "test_custom": "node src/utils/test_custom_template.js",
+    "list_templates": "node src/utils/list_templates.js",
+    "get_business_id": "node src/utils/get_business_account.js",
+    "validate_business_id": "node src/utils/get_business_account.js validate"
   },
   "dependencies": {
     "axios": "^0.21.1",
