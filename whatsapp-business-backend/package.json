@@ -10,7 +10,12 @@
     "test_custom": "node src/utils/test_custom_template.js",
     "list_templates": "node src/utils/list_templates.js",
     "get_business_id": "node src/utils/get_business_account.js",
-    "validate_business_id": "node src/utils/get_business_account.js validate"
+    "validate_business_id": "node src/utils/get_business_account.js validate",
+    "template_manager": "node src/utils/template_manager.js",
+    "create_template": "node src/utils/template_manager.js create",
+    "check_template_status": "node src/utils/template_manager.js status",
+    "monitor_template": "node src/utils/template_manager.js monitor",
+    "delete_template": "node src/utils/template_manager.js delete"
   },
   "dependencies": {
     "axios": "^0.21.1",
