@@ -21,7 +21,7 @@ async function listTemplates() {
             whatsappConfig.businessAccountId = businessAccountId; // Save for future use
         }
         const response = await axios.get(
-            `https://graph.facebook.com/v13.0/${businessAccountId}/message_templates`, {
+            `https://graph.facebook.com/v23.0/${businessAccountId}/message_templates`, {
                 headers: {
                     Authorization: `Bearer ${whatsappConfig.token}`
                 }

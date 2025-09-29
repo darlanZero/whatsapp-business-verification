@@ -1,18 +1,80 @@
 const axios = require('axios');
-const whatsappConfig = require('../config/whatsapp_config');
+const whatsappConfig = require('../config/whatsapp');
 
 class TemplateCreator {
     constructor() {
-        this.baseUrl = `https://graph.facebook.com/v13.0/${whatsappConfig.businessAccountId}`;
+        this.baseUrl = `https://graph.facebook.com/v23.0/${whatsappConfig.businessAccountId}`;
         this.headers = {
             'Authorization': `Bearer ${whatsappConfig.token}`,
             'Content-Type': 'application/json'
         }
     }
 
+    validateTemplateStructure(templateData) {
+        console.log('🔍 Validating template structure...');
+
+        let hasErrors = false;
+        const issues = [];
+
+        if (!templateData.components || templateData.components.length === 0) {
+            issues.push('❌ No components defined. At least a BODY component is required.');
+            hasErrors = true;
+        }
+
+        templateData.components.forEach((component, index) => {
+            if (component.text) {
+                const variables = component.text.match(/\{\{\d+\}\}/g) || [];
+
+                if (variables.length > 0) {
+                    if (component.type === 'BODY' && !component.example?.body_text) {
+                        issues.push(`❌ Component ${index + 1} (BODY) has variables but no example body_text provided.`);
+                        hasErrors = true;
+                    } else if (component.type === 'HEADER' && !component.example?.header_text) {
+                        issues.push(`❌ Component ${index + 1} (HEADER) has variables but no example header_text provided.`);
+                        hasErrors = true;
+                    }
+
+                    if (component.example?.body_text) {
+                        const exampleCount = component.example.body_text[0]?.length || 0;
+                        if (exampleCount < variables.length) {
+                            issues.push(`❌ Component ${index + 1} (BODY) has ${variables.length} variables but only ${exampleCount} example values.`);
+                            hasErrors = true;
+                        }
+                    }
+
+                    const textLength = component.text.replace(/\{\{\d+\}\}/g, '').length;
+                    const variableCount = variables.length;
+
+                    if (textLength < variableCount * 10) {
+                        issues.push(`⚠️ Component ${index + 1} (${component.type}) may have too many variables for its text length. Consider reducing variables or increasing text.`);
+                    }
+                }
+            }
+        })
+
+        if (hasErrors) {
+            console.log('❌ Validation failed with the following issues:');
+            issues.forEach(issue => console.log(issue));
+            return false;
+        } else if (issues.length > 0) {
+            console.log('⚠️ Validation completed with warnings:');
+            issues.forEach(issue => console.log(issue));
+            console.log('Template may still be rejected by WhatsApp.');
+        } else {
+            console.log('✅ Template structure looks good!');
+        }
+
+        return true;
+    }
+
     async createTemplate(templateData) {
         try {
             console.log(`🔨 Creating template "${templateData.name}"...`)
+
+            if (!this.validateTemplateStructure(templateData)) {
+                console.log('❌ Template creation aborted due to validation errors.');
+                return { success: false, error: 'Template validation failed' };
+            }
 
             const response = await axios.post(`${this.baseUrl}/message_templates`, templateData, { headers: this.headers });
             console.log('✅ Template created successfully!');
@@ -59,9 +121,23 @@ class TemplateCreator {
             console.log(`Category: ${template.category}`);
 
             if (template.status === 'REJECTED') {
-                console.log('❌ Templaate rejected by Meta.')
+                console.log('❌ Template rejected by Meta.')
                 if (template.rejected_reason) {
                     console.log(`Reason: ${template.rejected_reason}`);
+                    this.analyzeRejectionReason(template.rejected_reason);
+                }
+
+                if (template.quality_score) {
+                    console.log(`Quality Score: ${JSON.stringify(template.quality_score)}`);
+                }
+
+                console.log('\n📝 Template components for analysis:');
+                if (template.components) {
+                    template.components.forEach((comp, index) => {
+                        console.log(`   ${index + 1}. Type: ${comp.type}`);
+                        if (comp.text) console.log(`      Text: "${comp.text}"`);
+                        if (comp.format) console.log(`      Format: ${comp.format}`);
+                    });
                 }
             } else if (template.status === 'APPROVED') {
                 console.log('✅ Template approved and ready to use!');
@@ -72,11 +148,122 @@ class TemplateCreator {
             return {
                 success: true,
                 template: template,
-                status: template.status
+                status: template.status,
+                rejectedReason: template.rejected_reason || null,
+                qualityScore: template.quality_score || null
             }
         } catch (error) {
             console.error('❌ Error fetching template status:', error.response ? error.response.data : error.message);
             return { success: false, error: error.response ? error.response.data : error.message };
+        }
+    }
+
+    analyzeRejectionReason(rejectedReason) {
+        console.log('\n💡 Analysis and suggestions:');
+        
+        const reason = rejectedReason.toLowerCase();
+        
+        if (reason.includes('promotional') || reason.includes('marketing')) {
+            console.log('🔍 Issue: Content detected as promotional/marketing');
+            console.log('✅ Solutions:');
+            console.log('   - Remove words like: "bem-vindo", "ofertas", "promoção"');
+            console.log('   - Use neutral language: "confirmado", "processado", "código"');
+            console.log('   - Focus on functional messages, not promotional ones');
+            
+        } else if (reason.includes('policy') || reason.includes('violation')) {
+            console.log('🔍 Issue: Policy violation detected');
+            console.log('✅ Solutions:');
+            console.log('   - Review WhatsApp Business Policy');
+            console.log('   - Avoid sensitive topics (finance, health without authorization)');
+            console.log('   - Use appropriate category (UTILITY vs MARKETING)');
+            
+        } else if (reason.includes('spam') || reason.includes('unsolicited')) {
+            console.log('🔍 Issue: Content looks like spam');
+            console.log('✅ Solutions:');
+            console.log('   - Make message more specific and functional');
+            console.log('   - Add context like order numbers, user names');
+            console.log('   - Avoid generic greetings');
+            
+        } else if (reason.includes('language') || reason.includes('grammar')) {
+            console.log('🔍 Issue: Language or grammar problems');
+            console.log('✅ Solutions:');
+            console.log('   - Check spelling and grammar');
+            console.log('   - Use proper Portuguese/English');
+            console.log('   - Avoid informal language or slang');
+            
+        } else if (reason.includes('format') || reason.includes('structure')) {
+            console.log('🔍 Issue: Template format/structure problems');
+            console.log('✅ Solutions:');
+            console.log('   - Check component types (HEADER, BODY, FOOTER)');
+            console.log('   - Verify parameter placement {{1}}, {{2}}');
+            console.log('   - Follow WhatsApp template guidelines');
+            
+        } else if (reason.includes('category')) {
+            console.log('🔍 Issue: Wrong category selected');
+            console.log('✅ Solutions:');
+            console.log('   - UTILITY: confirmations, notifications, codes');
+            console.log('   - MARKETING: promotions (requires opt-in)');
+            console.log('   - AUTHENTICATION: verification codes only');
+            
+        } else {
+            console.log('🔍 Issue: General rejection');
+            console.log('✅ General solutions:');
+            console.log('   - Simplify the message');
+            console.log('   - Use more neutral, functional language');
+            console.log('   - Check if similar approved templates exist');
+            console.log('   - Consider changing category to UTILITY');
+        }
+        
+        console.log('\n📋 Recommended next steps:');
+        console.log('1. Delete this rejected template');
+        console.log('2. Create a simpler version');
+        console.log('3. Test with very basic content first');
+        console.log('4. Gradually add complexity once approved\n');
+    }
+
+    async analyzeRejectedTemplates() {
+        try {
+            console.log('🔍 Analyzing all rejected templates...\n');
+            
+            const templates = await this.listAllTemplates();
+            const rejectedTemplates = templates.filter(t => t.status === 'REJECTED');
+            
+            if (rejectedTemplates.length === 0) {
+                console.log('✅ No rejected templates found!');
+                return;
+            }
+            
+            console.log(`\n📊 Found ${rejectedTemplates.length} rejected templates:\n`);
+            console.log('='.repeat(90));
+            
+            rejectedTemplates.forEach((template, index) => {
+                console.log(`${index + 1}. ❌ "${template.name}"`);
+                console.log(`   Category: ${template.category}`);
+                console.log(`   Language: ${template.language}`);
+                
+                if (template.rejected_reason) {
+                    console.log(`   Reason: ${template.rejected_reason}`);
+                    this.analyzeRejectionReason(template.rejected_reason);
+                } else {
+                    console.log('   Reason: Not specified');
+                }
+                
+                console.log('─'.repeat(80));
+            });
+            
+            // Estatísticas
+            const categories = rejectedTemplates.reduce((acc, t) => {
+                acc[t.category] = (acc[t.category] || 0) + 1;
+                return acc;
+            }, {});
+            
+            console.log('\n📈 Rejection statistics by category:');
+            Object.entries(categories).forEach(([category, count]) => {
+                console.log(`   ${category}: ${count} rejected`);
+            });
+            
+        } catch (error) {
+            console.error('❌ Error analyzing rejected templates:', error);
         }
     }
 
@@ -101,7 +288,17 @@ class TemplateCreator {
                 console.log(`   Idioma: ${template.language}`);
                 console.log(`   Categoria: ${template.category}`);
                 console.log(`   ID: ${template.id}`);
-                console.log('─'.repeat(60));
+
+                if (template.status === 'REJECTED' && template.rejected_reason) {
+                    console.log(`   Reason for rejection: ${template.rejected_reason}`);
+                }
+    
+                if (template.created_time) {
+                    const createdDate = new Date(template.created_time * 1000).toLocaleString();
+                    console.log(`   Created at: ${createdDate}`);
+                }
+
+                console.log('─'.repeat(80));
             })
 
             return response.data.data;
@@ -167,62 +364,226 @@ class TemplateCreator {
         }
     }
 
-    getPresetTemplates() {
-        return {
-            boasVindas: {
-                name: "boas_vindas",
-                language: "pt_BR",
-                category: "UTILITY",
-                components: [
-                    {
-                        type: "HEADER",
-                        format: "TEXT",
-                        text: "Bem-vindo(a)!"
-                    },
-                    {
-                        type: "BODY",
-                        text: "Olá {{1}}! Seja bem-vindo(a) ao nosso serviço. Estamos aqui para ajudá-lo(a)."
-                    },
-                    {
-                        type: "FOOTER",
-                        text: "Equipe de Suporte"
+    // SUBSTITUA os presets problemáticos por estes:
+getPresetTemplates() {
+    return {
+        // ✅ FUNCIONA: Template sem variáveis
+        mensagemSimples: {
+            name: "mensagem_simples",
+            language: "pt_BR",
+            category: "UTILITY",
+            components: [
+                {
+                    type: "BODY",
+                    text: "Operação realizada com sucesso."
+                }
+            ]
+        },
+
+        alertaSimples: {
+            name: "alerta_simples",
+            language: "pt_BR",
+            category: "UTILITY",
+            components: [
+                {
+                    type: "HEADER",
+                    format: "TEXT",
+                    text: "Sistema"
+                },
+                {
+                    type: "BODY",
+                    text: "Sua conta foi atualizada com sucesso."
+                }
+            ]
+        },
+
+        // ✅ CORRIGIDO: Códigos com contexto específico
+        codigoVerificacao: {
+            name: "codigo_verificacao_especifico",
+            language: "pt_BR",
+            category: "AUTHENTICATION",
+            components: [
+                {
+                    type: "BODY",
+                    text: "Seu código de verificação de acesso é {{1}}. Este código expira em 10 minutos.",
+                    example: {
+                        body_text: [["123456"]]
                     }
-                ]
-            },
-            confirmacaoPedido: {
-                name: "confirmacao_pedido",
-                language: "pt_BR",
-                category: "UTILITY",
-                components: [
-                    {
-                        type: "HEADER",
-                        format: "TEXT",
-                        text: "Pedido Confirmado"
-                    },
-                    {
-                        type: "BODY",
-                        text: "Olá {{1}}! Seu pedido #{{2}} no valor de {{3}} foi confirmado e será processado em breve."
-                    },
-                    {
-                        type: "FOOTER",
-                        text: "Obrigado pela preferência!"
+                },
+                {
+                    type: "FOOTER",
+                    text: "Não compartilhe este código com ninguém"
+                }
+            ]
+        },
+
+        // ✅ CORRIGIDO: Status com contexto específico
+        statusPedidoEspecifico: {
+            name: "status_pedido_especifico",
+            language: "pt_BR",
+            category: "UTILITY",
+            components: [
+                {
+                    type: "HEADER",
+                    format: "TEXT",
+                    text: "Atualização do Pedido"
+                },
+                {
+                    type: "BODY",
+                    text: "Seu pedido número {{1}} foi atualizado para o status: {{2}}. Acompanhe pelo nosso sistema.",
+                    example: {
+                        body_text: [["#12345", "Em trânsito"]]
                     }
-                ]
-            },
-            lembreteSimples: {
-                name: "lembrete_simples",
-                language: "pt_BR",
-                category: "UTILITY",
-                components: [
-                    {
-                        type: "BODY",
-                        text: "🔔 Lembrete: {{1}}. Não esqueça!"
+                }
+            ]
+        },
+
+        // ✅ CORRIGIDO: Confirmação com contexto específico
+        confirmacaoPagamento: {
+            name: "confirmacao_pagamento",
+            language: "pt_BR",
+            category: "UTILITY",
+            components: [
+                {
+                    type: "HEADER",
+                    format: "TEXT",
+                    text: "Pagamento Confirmado"
+                },
+                {
+                    type: "BODY",
+                    text: "Seu pagamento de {{1}} foi processado com sucesso. Número da transação: {{2}}.",
+                    example: {
+                        body_text: [["R$ 99,90", "TXN789456"]]
                     }
-                ]
-            }
-        };
-    }
-}
+                },
+                {
+                    type: "FOOTER",
+                    text: "Obrigado pela preferência"
+                }
+            ]
+        },
+
+        // ✅ NOVO: Agendamento específico
+        confirmacaoAgendamento: {
+            name: "confirmacao_agendamento",
+            language: "pt_BR",
+            category: "UTILITY",
+            components: [
+                {
+                    type: "HEADER",
+                    format: "TEXT",
+                    text: "Agendamento Confirmado"
+                },
+                {
+                    type: "BODY",
+                    text: "Seu agendamento para {{1}} foi confirmado para o dia {{2}} às {{3}}.",
+                    example: {
+                        body_text: [["consulta médica", "15/09/2024", "14:30"]]
+                    }
+                }
+            ]
+        },
+
+        // ✅ NOVO: Notificação de entrega
+        notificacaoEntrega: {
+            name: "notificacao_entrega",
+            language: "pt_BR",
+            category: "UTILITY",
+            components: [
+                {
+                    type: "BODY",
+                    text: "Seu pedido {{1}} chegou ao centro de distribuição {{2}} e será entregue em até {{3}} dias úteis.",
+                    example: {
+                        body_text: [["#12345", "São Paulo", "2"]]
+                    }
+                }
+            ]
+        },
+
+        // ✅ NOVO: Alerta de segurança específico
+        alertaLoginSeguranca: {
+            name: "alerta_login_seguranca",
+            language: "pt_BR",
+            category: "UTILITY",
+            components: [
+                {
+                    type: "HEADER",
+                    format: "TEXT",
+                    text: "Alerta de Segurança"
+                },
+                {
+                    type: "BODY",
+                    text: "Detectamos um novo acesso à sua conta em {{1}} no dia {{2}}. Se não foi você, altere sua senha imediatamente.",
+                    example: {
+                        body_text: [["São Paulo, SP", "12/09/2024"]]
+                    }
+                }
+            ]
+        },
+
+        // ✅ NOVO: Renovação de serviço
+        lembreteRenovacao: {
+            name: "lembrete_renovacao",
+            language: "pt_BR",
+            category: "UTILITY",
+            components: [
+                {
+                    type: "HEADER",
+                    format: "TEXT",
+                    text: "Lembrete de Renovação"
+                },
+                {
+                    type: "BODY",
+                    text: "Seu plano {{1}} vence em {{2}} dias. Renove agora para não perder o acesso aos serviços.",
+                    example: {
+                        body_text: [["Premium", "7"]]
+                    }
+                }
+            ]
+        },
+
+        // ✅ NOVO: Confirmação de cadastro específica
+        confirmacaoCadastro: {
+            name: "confirmacao_cadastro_completo",
+            language: "pt_BR",
+            category: "UTILITY",
+            components: [
+                {
+                    type: "HEADER",
+                    format: "TEXT",
+                    text: "Cadastro Realizado"
+                },
+                {
+                    type: "BODY",
+                    text: "Olá {{1}}! Seu cadastro foi realizado com sucesso. Seu ID de usuário é {{2}}.",
+                    example: {
+                        body_text: [["João Silva", "USR789123"]]
+                    }
+                },
+                {
+                    type: "FOOTER",
+                    text: "Bem-vindo à nossa plataforma"
+                }
+            ]
+        },
+
+        // ✅ NOVO: Template muito específico - quase sempre aprovado
+        codigoRecuperacaoSenha: {
+            name: "codigo_recuperacao_senha",
+            language: "pt_BR",
+            category: "AUTHENTICATION",
+            components: [
+                {
+                    type: "BODY",
+                    text: "Use o código {{1}} para redefinir sua senha. Este código é válido por 15 minutos e só pode ser usado uma vez.",
+                    example: {
+                        body_text: [["456789"]]
+                    }
+                }
+            ]
+        }
+    };
+}}
 
 async function createCustomTemplate() {
     const templateName = process.argv[3];
@@ -337,6 +698,10 @@ if (require.main === module) {
             break;
         case 'monitor':
             monitorTemplateStatus();
+            break;
+        case 'analyze_rejected':
+            const creator = new TemplateCreator();
+            creator.analyzeRejectedTemplates();
             break;
         default:
             console.log('🚀 Template Manager - WhatsApp Business API\n');

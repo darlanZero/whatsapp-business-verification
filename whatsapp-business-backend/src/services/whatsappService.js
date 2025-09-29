@@ -48,7 +48,7 @@ class WhatsAppService {
     async getMessageStatus(messageId) {
         try {
             const response = await axios.get(
-                `https://graph.facebook.com/v13.0/${messageId}`,
+                `https://graph.facebook.com/v23.0/${messageId}`,
                 {
                     headers: {
                         'Authorization': `Bearer ${whatsappConfig.token}`,

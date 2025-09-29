@@ -15,7 +15,9 @@
     "create_template": "node src/utils/template_manager.js create",
     "check_template_status": "node src/utils/template_manager.js status",
     "monitor_template": "node src/utils/template_manager.js monitor",
-    "delete_template": "node src/utils/template_manager.js delete"
+    "delete_template": "node src/utils/template_manager.js delete",
+        "analyze_rejected": "node src/utils/template_manager.js analyze_rejected"
+
   },
   "dependencies": {
     "axios": "^0.21.1",

@@ -8,7 +8,7 @@ async function getBusinessAccountId() {
         // Método 1: Informações básicas do phone number (sem o campo problemático)
         try {
             const phoneResponse = await axios.get(
-                `https://graph.facebook.com/v13.0/${whatsappConfig.phoneNumberId}?fields=id,verified_name,display_phone_number`,
+                `https://graph.facebook.com/v23.0/${whatsappConfig.phoneNumberId}?fields=id,verified_name,display_phone_number`,
                 {
                     headers: {
                         'Authorization': `Bearer ${whatsappConfig.token}`
@@ -29,7 +29,7 @@ async function getBusinessAccountId() {
         
         try {
             const wbaResponse = await axios.get(
-                'https://graph.facebook.com/v13.0/me/whatsapp_business_accounts',
+                'https://graph.facebook.com/v23.0/me/whatsapp_business_accounts',
                 {
                     headers: {
                         'Authorization': `Bearer ${whatsappConfig.token}`
@@ -60,7 +60,7 @@ async function getBusinessAccountId() {
         
         try {
             const accountsResponse = await axios.get(
-                'https://graph.facebook.com/v13.0/me/businesses',
+                'https://graph.facebook.com/v23.0/me/businesses',
                 {
                     headers: {
                         'Authorization': `Bearer ${whatsappConfig.token}`
@@ -90,7 +90,7 @@ async function getBusinessAccountId() {
         
         try {
             const debugResponse = await axios.get(
-                `https://graph.facebook.com/v13.0/debug_token?input_token=${whatsappConfig.token}`,
+                `https://graph.facebook.com/v23.0/debug_token?input_token=${whatsappConfig.token}`,
                 {
                     headers: {
                         'Authorization': `Bearer ${whatsappConfig.token}`
@@ -139,7 +139,7 @@ async function validateBusinessAccountId(businessAccountId) {
         console.log(`🔍 Validando Business Account ID: ${businessAccountId}...`);
         
         const response = await axios.get(
-            `https://graph.facebook.com/v13.0/${businessAccountId}?fields=id,name`,
+            `https://graph.facebook.com/v23.0/${businessAccountId}?fields=id,name`,
             {
                 headers: {
                     'Authorization': `Bearer ${whatsappConfig.token}`
@@ -168,7 +168,7 @@ async function testTemplatesWithBusinessAccountId(businessAccountId) {
         console.log(`🧪 Testando listagem de templates com Business Account ID: ${businessAccountId}...`);
         
         const response = await axios.get(
-            `https://graph.facebook.com/v13.0/${businessAccountId}/message_templates`,
+            `https://graph.facebook.com/v23.0/${businessAccountId}/message_templates`,
             {
                 headers: {
                     'Authorization': `Bearer ${whatsappConfig.token}`

@@ -34,8 +34,8 @@ async function testCustomTemplate() {
 
         const customTemplateConfig = {
             recipientNumber: "5531972071758", // Replace with test number
-            templateName: "teste", // Name of the template created in Business Manager
-            language: "en", // Language code
+            templateName: "alerta_simples", // Name of the template created in Business Manager
+            language: "pt_BR", // Language code
             parameters: [] // Add parameters if necessary
         }
 
