@@ -1,9 +1,19 @@
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
+
 const express = require('express');
 const cors = require('cors');
 const whatsappRoutes = require('./routes/whatsappRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Log para verificar se as variáveis foram carregadas
+console.log('📝 Verificando variáveis de ambiente:');
+console.log('- WHATSAPP_APP_ID:', process.env.WHATSAPP_APP_ID ? '✅ Configurado' : '❌ Não configurado');
+console.log('- WHATSAPP_APP_SECRET:', process.env.WHATSAPP_APP_SECRET ? '✅ Configurado' : '❌ Não configurado');
+console.log('- WHATSAPP_REDIRECT_URI:', process.env.WHATSAPP_REDIRECT_URI || '❌ Não configurado');
+console.log('- FRONTEND_URL:', process.env.FRONTEND_URL || '❌ Não configurado');
+console.log('- JWT_SECRET:', process.env.JWT_SECRET ? '✅ Configurado' : '❌ Não configurado');
 
 // Middlewares
 app.use(cors());
@@ -30,7 +40,9 @@ app.get('/', (req, res) => {
             health: '/health',
             sendTemplate: 'POST /api/whatsapp/send-template',
             sendMessage: 'POST /api/whatsapp/send-message',
-            messageStatus: 'GET /api/whatsapp/message-status/:messageId'
+            messageStatus: 'GET /api/whatsapp/message-status/:messageId',
+            metaAuth: 'GET /api/whatsapp/auth/facebook',
+            metaCallback: 'GET /api/whatsapp/auth/facebook/callback'
         }
     });
 });
