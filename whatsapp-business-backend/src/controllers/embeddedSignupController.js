@@ -144,11 +144,11 @@ class EmbeddedSignupController {
 
             console.log('✅ Token obtido com sucesso');
 
-            console.log('\n' + '='.repeat(80));
-            console.log('🔑 TOKEN PARA DEBUG - Copie o comando abaixo e execute:');
-            console.log('='.repeat(80));
-            console.log(`npm run checkWABA ${response.data.access_token}`);
-            console.log('='.repeat(80) + '\n');
+            //console.log('\n' + '='.repeat(80));
+            //console.log('🔑 TOKEN PARA DEBUG - Copie o comando abaixo e execute:');
+            //console.log('='.repeat(80));
+            //console.log(`npm run checkWABA ${response.data.access_token}`);
+            //console.log('='.repeat(80) + '\n');
 
             return {
                 success: true,
@@ -169,7 +169,7 @@ class EmbeddedSignupController {
         try {
             console.log('🔵 Buscando informações da conta comercial...');
             
-            // 1. Buscar as contas comerciais do cliente (não do app)
+            // 1. Buscar as contas comerciais do cliente
             console.log('🔍 Buscando contas comerciais do cliente...');
             const businessResponse = await axios.get(`${base_url}me/businesses`, {
                 ...this.axiosConfig,
@@ -186,137 +186,118 @@ class EmbeddedSignupController {
             const business = businessResponse.data.data[0];
             console.log('✅ Conta comercial do cliente encontrada:', business.name, '(ID:', business.id + ')');
 
-            // 2. Buscar WABAs vinculadas à conta comercial do cliente
-            console.log('🔍 Buscando WABAs vinculadas à conta comercial do cliente...');
-            
-            // Tentar os dois endpoints possíveis
-            let wabaIds = [];
-            
+            // 2. Método 1: Tentar buscar WABAs via /me/whatsapp_business_accounts
+            console.log('🔍 Tentando buscar WABAs via /me...');
             try {
-                const wabaResponse1 = await axios.get(`${base_url}${business.id}/client_whatsapp_business_accounts`, {
+                const response = await axios.get(`${base_url}me/`, {
                     ...this.axiosConfig,
-                    params: { access_token: accessToken },
-                    timeout: 30000
-                });
-                
-                if (wabaResponse1.data.data && wabaResponse1.data.data.length > 0) {
-                    wabaIds = wabaResponse1.data.data.map(waba => waba.id);
-                    console.log('✅ WABAs encontradas via client_whatsapp_business_accounts:', wabaIds);
-                }
-            } catch (error) {
-                console.log('⚠️ Endpoint client_whatsapp_business_accounts não retornou dados');
-            }
-
-            // Se não encontrou, tentar endpoint alternativo
-            if (wabaIds.length === 0) {
-                try {
-                    const wabaResponse2 = await axios.get(`${base_url}${business.id}/owned_whatsapp_business_accounts`, {
-                        ...this.axiosConfig,
-                        params: { access_token: accessToken },
-                        timeout: 30000
-                    });
-                    
-                    if (wabaResponse2.data.data && wabaResponse2.data.data.length > 0) {
-                        wabaIds = wabaResponse2.data.data.map(waba => waba.id);
-                        console.log('✅ WABAs encontradas via owned_whatsapp_business_accounts:', wabaIds);
-                    }
-                } catch (error) {
-                    console.log('⚠️ Endpoint owned_whatsapp_business_accounts não retornou dados');
-                }
-            }
-
-            // Se ainda não encontrou, buscar via debug_token (fallback)
-            if (wabaIds.length === 0) {
-                console.log('⚠️ Tentando buscar WABAs via permissões do token (fallback)...');
-                const debugResponse = await axios.get(`${base_url}debug_token`, {
-                    ...this.axiosConfig,
-                    params: { 
-                        input_token: accessToken,
-                        access_token: `${process.env.WHATSAPP_APP_ID}|${process.env.WHATSAPP_APP_SECRET}`
+                    params: {
+                        fields: 'whatsapp_business_accounts{id,name,timezone_id,message_template_namespace}',
+                        access_token: accessToken
                     },
                     timeout: 30000
                 });
 
-                const granularScopes = debugResponse.data.data.granular_scopes || [];
-                const wabaScopes = granularScopes.find(s => s.scope === 'whatsapp_business_management');
-                
-                if (wabaScopes && wabaScopes.target_ids && wabaScopes.target_ids.length > 0) {
-                    wabaIds = wabaScopes.target_ids;
-                    console.log('✅ WABAs encontradas via debug_token:', wabaIds);
+                const wabas = response.data.whatsapp_business_accounts?.data || [];
+
+                if (wabas.length > 0) {
+                    console.log('✅ WABAs encontradas via /me:', wabas.length);
+                    return await this.findWabaWithPhone(wabas, accessToken, base_url);
+                } else {
+                    console.log('⚠️ Nenhuma WABA encontrada via /me, tentando fallback...');
                 }
+            } catch (error) {
+                console.log('⚠️ Erro ao buscar WABAs via /me:', error.response?.data || error.message);
             }
 
-            if (wabaIds.length === 0) {
-                throw new Error('Nenhuma WhatsApp Business Account encontrada para este cliente');
+            // 3. Método 2: Fallback via debug_token
+            console.log('🔄 Usando debug_token como fallback...');
+            const debugResponse = await axios.get(`${base_url}debug_token`, {
+                ...this.axiosConfig,
+                params: {
+                    input_token: accessToken,
+                    access_token: `${process.env.WHATSAPP_APP_ID || whatsappConfig.whatsappAppId}|${process.env.WHATSAPP_APP_SECRET || whatsappConfig.whatsappAppSecret}`
+                },
+                timeout: 30000
+            });
+
+            // ✅ CORREÇÃO: granular_scopes é um array de objetos
+            const wabaScopes = debugResponse.data.data.granular_scopes?.find(
+                s => s.scope === 'whatsapp_business_management'
+            );
+
+            if (!wabaScopes || !wabaScopes.target_ids || wabaScopes.target_ids.length === 0) {
+                throw new Error('Nenhuma WABA encontrada no token');
             }
 
-            // 3. Buscar a primeira WABA que tenha número de telefone
-            console.log('🔍 Buscando WABA com número de telefone ativo...');
-            
-            let wabaWithPhone = null;
-            
-            for (const wabaId of wabaIds) {
-                try {
-                    console.log(`   📱 Verificando WABA ${wabaId}...`);
-                    
-                    // Buscar detalhes da WABA
-                    const wabaDetailsResponse = await axios.get(`${base_url}${wabaId}`, {
+            console.log('✅ WABAs encontradas via debug_token:', wabaScopes.target_ids.length);
+
+            // ✅ CORREÇÃO: adicionar return no map
+            const wabas = await Promise.all(
+                wabaScopes.target_ids.map(id => 
+                    axios.get(`${base_url}${id}`, {
                         ...this.axiosConfig,
                         params: {
+                            access_token: accessToken,
                             fields: 'id,name,timezone_id,message_template_namespace',
-                            access_token: accessToken
-                        },
-                        timeout: 30000
-                    });
+                        }
+                    }).then(response => response.data)
+                )
+            );
 
-                    const wabaDetails = wabaDetailsResponse.data;
-                    
-                    // Buscar números de telefone desta WABA
-                    const phoneResponse = await axios.get(`${base_url}${wabaId}/phone_numbers`, {
-                        ...this.axiosConfig,
-                        params: {
-                            access_token: accessToken
-                        },
-                        timeout: 30000
-                    });
-
-                    if (phoneResponse.data.data && phoneResponse.data.data.length > 0) {
-                        const phoneNumber = phoneResponse.data.data[0];
-                        console.log(`   ✅ WABA ${wabaId} tem número de telefone:`, phoneNumber.display_phone_number);
-                        
-                        wabaWithPhone = {
-                            wabaId: wabaId,
-                            wabaDetails: wabaDetails,
-                            phoneNumber: phoneNumber
-                        };
-                        break; // Encontrou uma WABA com telefone, pode parar
-                    } else {
-                        console.log(`   ⚠️ WABA ${wabaId} não possui números de telefone, ignorando...`);
-                    }
-                } catch (error) {
-                    console.log(`   ❌ Erro ao verificar WABA ${wabaId}:`, error.message);
-                    // Continua para a próxima WABA
-                }
-            }
-
-            if (!wabaWithPhone) {
-                throw new Error('Nenhuma WhatsApp Business Account com número de telefone ativo foi encontrada');
-            }
-
-            console.log('✅ WABA selecionada:', wabaWithPhone.wabaDetails.name || wabaWithPhone.wabaId);
-            console.log('✅ Número de telefone:', wabaWithPhone.phoneNumber.display_phone_number);
-
-            return {
-                id: business.id,
-                name: business.name,
-                phone_number_id: wabaWithPhone.phoneNumber.id,
-                display_phone_number: wabaWithPhone.phoneNumber.display_phone_number,
-                whatsapp_business_account_id: wabaWithPhone.wabaId
-            }
+            return await this.findWabaWithPhone(wabas, accessToken, base_url);
+            
         } catch (error) {
-            console.error('❌ Error fetching business account info:', error.response ? error.response.data : error.message);
-            throw new Error(error.response ? error.response.data.error?.message || error.response.data : error.message);
+            console.error('❌ Erro ao buscar informações da conta:', error.response?.data || error.message);
+            throw new Error(error.response?.data?.error?.message || error.message);
         }
+    }
+
+    async findWabaWithPhone(wabas, accessToken, base_url) {
+        for (const waba of wabas) {
+            try {
+                console.log(`🔍 Verificando WABA: ${waba.name} (ID: ${waba.id})...`);
+                
+                const phoneResponse = await axios.get(`${base_url}${waba.id}/phone_numbers`, {
+                    ...this.axiosConfig,
+                    params: {
+                        access_token: accessToken
+                    },
+                    timeout: 30000
+                });
+                
+
+                const businessResponse = await axios.get(`${base_url}me/businesses`, {
+                    ...this.axiosConfig,
+                    headers: {
+                        Authorization: `Bearer ${accessToken}`
+                    },
+                    timeout: 30000
+                });
+
+                const business = businessResponse.data.data[0];
+
+                const phoneNumbers = phoneResponse.data.data || [];
+
+                if (phoneNumbers.length > 0) {
+                    console.log(`✅ WABA válida encontrada: ${waba.name} com número ${phoneNumbers[0].display_phone_number}`);
+                    return {
+                        id: business.id,
+                        name: business.name,
+                        whatsapp_business_account_id: waba.id,
+                        whatsapp_business_account_name: waba.name,
+                        phone_number_id: phoneNumbers[0].id,
+                        display_phone_number: phoneNumbers[0].display_phone_number
+                    };
+                } else {
+                    console.log(`⚠️ WABA ${waba.name} não possui números de telefone`);
+                }
+            } catch (error) {
+                console.error(`❌ Erro ao verificar WABA ${waba.id}:`, error.response?.data || error.message);
+            }
+        }
+        
+        throw new Error('Nenhuma WABA com número de telefone ativo encontrada');
     }
 
     async saveBusinessAccount(accountData) {
