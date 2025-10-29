@@ -16,13 +16,16 @@
     "check_template_status": "node src/utils/template_manager.js status",
     "monitor_template": "node src/utils/template_manager.js monitor",
     "delete_template": "node src/utils/template_manager.js delete",
-    "analyze_rejected": "node src/utils/template_manager.js analyze_rejected"
+    "analyze_rejected": "node src/utils/template_manager.js analyze_rejected",
+    "checkWABA": "node src/utils/check_waba.js"
+
   },
   "dependencies": {
     "axios": "^0.21.1",
     "cors": "^2.8.5",
     "dotenv": "^10.0.0",
     "express": "^4.17.1",
+    "https-proxy-agent": "^7.0.6",
     "jsonwebtoken": "^9.0.2"
   },
   "devDependencies": {

@@ -1,8 +1,18 @@
 const axios = require('axios');
 const jwt = require('jsonwebtoken'); 
 const whatsappConfig = require('../config/whatsapp');
+const {HttpsProxyAgent} = require('https-proxy-agent')
 
 class EmbeddedSignupController {
+
+    constructor() {
+        this.axiosConfig = {};
+        if (process.env.HTTP_PROXY) {
+            const proxyUrl = process.env.HTTP_PROXY;
+            this.axiosConfig.httpsAgent = new HttpsProxyAgent(proxyUrl);
+            console.log('✅ Configured axios to use HTTP proxy:', proxyUrl);
+        }
+    }
 
     async initiateMetaAuth(req, res) {
         try {
@@ -119,15 +129,27 @@ class EmbeddedSignupController {
             console.log('- Code:', code.substring(0, 20) + '...');
             
             const response = await axios.get(`${base_url}oauth/access_token`, {
+                ...this.axiosConfig,
                 params: {
-                    client_id: process.env.WHATSAPP_APP_ID,
-                    client_secret: process.env.WHATSAPP_APP_SECRET,
-                    redirect_uri: process.env.WHATSAPP_REDIRECT_URI,
+                    client_id: process.env.WHATSAPP_APP_ID || whatsappConfig.whatsappAppId,
+                    client_secret: process.env.WHATSAPP_APP_SECRET || whatsappConfig.whatsappAppSecret,
+                    redirect_uri: process.env.WHATSAPP_REDIRECT_URI || whatsappConfig.whatsappRedirectUri,
                     code: code
+                },
+                timeout: 30000,
+                headers: {
+                    'User-Agent': 'WhatsApp_business-Backend/1.0'
                 }
             });
 
             console.log('✅ Token obtido com sucesso');
+
+            console.log('\n' + '='.repeat(80));
+            console.log('🔑 TOKEN PARA DEBUG - Copie o comando abaixo e execute:');
+            console.log('='.repeat(80));
+            console.log(`npm run checkWABA ${response.data.access_token}`);
+            console.log('='.repeat(80) + '\n');
+
             return {
                 success: true,
                 access_token: response.data.access_token,
@@ -141,66 +163,159 @@ class EmbeddedSignupController {
         }
     }
 
-async getBusinessAccountInfo(accessToken) {
+    async getBusinessAccountInfo(accessToken) {
         const base_url = 'https://graph.facebook.com/v23.0/';
 
         try {
             console.log('🔵 Buscando informações da conta comercial...');
             
-            // 1. Buscar a conta comercial (Business)
-            const response = await axios.get(`${base_url}me/businesses`, {
+            // 1. Buscar as contas comerciais do cliente (não do app)
+            console.log('🔍 Buscando contas comerciais do cliente...');
+            const businessResponse = await axios.get(`${base_url}me/businesses`, {
+                ...this.axiosConfig,
                 headers: {
                     Authorization: `Bearer ${accessToken}`
-                }
+                },
+                timeout: 30000
             });
 
-            if (!response.data.data || response.data.data.length === 0) {
-                throw new Error('Nenhuma conta comercial encontrada');
+            if (!businessResponse.data.data || businessResponse.data.data.length === 0) {
+                throw new Error('Nenhuma conta comercial encontrada para este cliente');
             }
 
-            const businessAccount = response.data.data[0];
-            console.log('✅ Conta comercial encontrada:', businessAccount.name);
+            const business = businessResponse.data.data[0];
+            console.log('✅ Conta comercial do cliente encontrada:', business.name, '(ID:', business.id + ')');
 
-            // 2. Buscar as WhatsApp Business Accounts (WABA) vinculadas ao Business
-            console.log('🔵 Buscando WhatsApp Business Accounts...');
-            const wabaResponse = await axios.get(`${base_url}${businessAccount.id}/client_whatsapp_business_accounts`, {
-                params: {
-                    access_token: accessToken
+            // 2. Buscar WABAs vinculadas à conta comercial do cliente
+            console.log('🔍 Buscando WABAs vinculadas à conta comercial do cliente...');
+            
+            // Tentar os dois endpoints possíveis
+            let wabaIds = [];
+            
+            try {
+                const wabaResponse1 = await axios.get(`${base_url}${business.id}/client_whatsapp_business_accounts`, {
+                    ...this.axiosConfig,
+                    params: { access_token: accessToken },
+                    timeout: 30000
+                });
+                
+                if (wabaResponse1.data.data && wabaResponse1.data.data.length > 0) {
+                    wabaIds = wabaResponse1.data.data.map(waba => waba.id);
+                    console.log('✅ WABAs encontradas via client_whatsapp_business_accounts:', wabaIds);
                 }
-            });
-
-            if (!wabaResponse.data.data || wabaResponse.data.data.length === 0) {
-                throw new Error('Nenhuma WhatsApp Business Account encontrada');
+            } catch (error) {
+                console.log('⚠️ Endpoint client_whatsapp_business_accounts não retornou dados');
             }
 
-            const waba = wabaResponse.data.data[0];
-            console.log('✅ WABA encontrada:', waba.id);
-
-            // 3. Buscar os números de telefone da WABA
-            console.log('🔵 Buscando números de telefone...');
-            const phoneResponse = await axios.get(`${base_url}${waba.id}/phone_numbers`, {
-                params: {
-                    access_token: accessToken
+            // Se não encontrou, tentar endpoint alternativo
+            if (wabaIds.length === 0) {
+                try {
+                    const wabaResponse2 = await axios.get(`${base_url}${business.id}/owned_whatsapp_business_accounts`, {
+                        ...this.axiosConfig,
+                        params: { access_token: accessToken },
+                        timeout: 30000
+                    });
+                    
+                    if (wabaResponse2.data.data && wabaResponse2.data.data.length > 0) {
+                        wabaIds = wabaResponse2.data.data.map(waba => waba.id);
+                        console.log('✅ WABAs encontradas via owned_whatsapp_business_accounts:', wabaIds);
+                    }
+                } catch (error) {
+                    console.log('⚠️ Endpoint owned_whatsapp_business_accounts não retornou dados');
                 }
-            });
-
-            if (!phoneResponse.data.data || phoneResponse.data.data.length === 0) {
-                throw new Error('Nenhum número de telefone encontrado');
             }
 
-            const phoneNumber = phoneResponse.data.data[0];
-            console.log('✅ Número de telefone encontrado:', phoneNumber.display_phone_number);
+            // Se ainda não encontrou, buscar via debug_token (fallback)
+            if (wabaIds.length === 0) {
+                console.log('⚠️ Tentando buscar WABAs via permissões do token (fallback)...');
+                const debugResponse = await axios.get(`${base_url}debug_token`, {
+                    ...this.axiosConfig,
+                    params: { 
+                        input_token: accessToken,
+                        access_token: `${process.env.WHATSAPP_APP_ID}|${process.env.WHATSAPP_APP_SECRET}`
+                    },
+                    timeout: 30000
+                });
+
+                const granularScopes = debugResponse.data.data.granular_scopes || [];
+                const wabaScopes = granularScopes.find(s => s.scope === 'whatsapp_business_management');
+                
+                if (wabaScopes && wabaScopes.target_ids && wabaScopes.target_ids.length > 0) {
+                    wabaIds = wabaScopes.target_ids;
+                    console.log('✅ WABAs encontradas via debug_token:', wabaIds);
+                }
+            }
+
+            if (wabaIds.length === 0) {
+                throw new Error('Nenhuma WhatsApp Business Account encontrada para este cliente');
+            }
+
+            // 3. Buscar a primeira WABA que tenha número de telefone
+            console.log('🔍 Buscando WABA com número de telefone ativo...');
+            
+            let wabaWithPhone = null;
+            
+            for (const wabaId of wabaIds) {
+                try {
+                    console.log(`   📱 Verificando WABA ${wabaId}...`);
+                    
+                    // Buscar detalhes da WABA
+                    const wabaDetailsResponse = await axios.get(`${base_url}${wabaId}`, {
+                        ...this.axiosConfig,
+                        params: {
+                            fields: 'id,name,timezone_id,message_template_namespace',
+                            access_token: accessToken
+                        },
+                        timeout: 30000
+                    });
+
+                    const wabaDetails = wabaDetailsResponse.data;
+                    
+                    // Buscar números de telefone desta WABA
+                    const phoneResponse = await axios.get(`${base_url}${wabaId}/phone_numbers`, {
+                        ...this.axiosConfig,
+                        params: {
+                            access_token: accessToken
+                        },
+                        timeout: 30000
+                    });
+
+                    if (phoneResponse.data.data && phoneResponse.data.data.length > 0) {
+                        const phoneNumber = phoneResponse.data.data[0];
+                        console.log(`   ✅ WABA ${wabaId} tem número de telefone:`, phoneNumber.display_phone_number);
+                        
+                        wabaWithPhone = {
+                            wabaId: wabaId,
+                            wabaDetails: wabaDetails,
+                            phoneNumber: phoneNumber
+                        };
+                        break; // Encontrou uma WABA com telefone, pode parar
+                    } else {
+                        console.log(`   ⚠️ WABA ${wabaId} não possui números de telefone, ignorando...`);
+                    }
+                } catch (error) {
+                    console.log(`   ❌ Erro ao verificar WABA ${wabaId}:`, error.message);
+                    // Continua para a próxima WABA
+                }
+            }
+
+            if (!wabaWithPhone) {
+                throw new Error('Nenhuma WhatsApp Business Account com número de telefone ativo foi encontrada');
+            }
+
+            console.log('✅ WABA selecionada:', wabaWithPhone.wabaDetails.name || wabaWithPhone.wabaId);
+            console.log('✅ Número de telefone:', wabaWithPhone.phoneNumber.display_phone_number);
 
             return {
-                id: businessAccount.id,
-                name: businessAccount.name,
-                phone_number_id: phoneNumber.id,
-                display_phone_number: phoneNumber.display_phone_number,
-                whatsapp_business_account_id: waba.id
+                id: business.id,
+                name: business.name,
+                phone_number_id: wabaWithPhone.phoneNumber.id,
+                display_phone_number: wabaWithPhone.phoneNumber.display_phone_number,
+                whatsapp_business_account_id: wabaWithPhone.wabaId
             }
         } catch (error) {
             console.error('❌ Error fetching business account info:', error.response ? error.response.data : error.message);
-            throw new Error(error.response ? error.response.data : error.message);
+            throw new Error(error.response ? error.response.data.error?.message || error.response.data : error.message);
         }
     }
 
