@@ -58,22 +58,29 @@ class EmbeddedSignupController {
 
             console.log('Token exchange successful');
 
-            const businessInfo = await this.getBusinessAccountInfo(tokenResponse.access_token);
+            const accountInfo = await this.getBusinessAccountInfo(tokenResponse.access_token);
 
-            await this.saveBusinessAccount({
-                access_token: tokenResponse.access_token,
-                business_account_id: businessInfo.id,
-                phone_number_id: businessInfo.phone_number_id,
-                whatsapp_business_account_id: businessInfo.whatsapp_business_account_id,
-                display_phone_number: businessInfo.display_phone_number,
-                name: businessInfo.name
-            })
+            // Salvar todas as contas comerciais
+            for (const businessAccount of accountInfo.businessAccounts) {
+                await this.saveBusinessAccount({
+                    access_token: tokenResponse.access_token,
+                    user_id: accountInfo.user.id,
+                    user_name: accountInfo.user.name,
+                    user_email: accountInfo.user.email,
+                    business_account_id: businessAccount.id,
+                    phone_number_id: businessAccount.phone_number_id,
+                    whatsapp_business_account_id: businessAccount.whatsapp_business_account_id,
+                    display_phone_number: businessAccount.display_phone_number,
+                    business_name: businessAccount.name,
+                    whatsapp_business_account_name: businessAccount.whatsapp_business_account_name
+                })
+            }
 
             const userToken = this.generateUserToken({
-                businessAccountId: businessInfo.id,
-                phoneNumberId: businessInfo.phone_number_id,
-                displayPhoneNumber: businessInfo.display_phone_number,
-                name: businessInfo.name,
+                userId: accountInfo.user.id,
+                userName: accountInfo.user.name,
+                userEmail: accountInfo.user.email,
+                businessAccounts: accountInfo.businessAccounts,
                 apiType: 'meta'
             })
 
@@ -99,19 +106,39 @@ class EmbeddedSignupController {
                 return res.status(500).json({ success: false, error: 'Failed to exchange code for token', details: tokenResponse });
             }
 
-            const businessInfo = await this.getBusinessAccountInfo(tokenResponse.access_token);
+            const accountInfo = await this.getBusinessAccountInfo(tokenResponse.access_token);
 
-            await this.saveBusinessAccount({
-                access_token: tokenResponse.access_token,
-                business_account_id: businessInfo.id,
-                phone_number_id: businessInfo.phone_number_id,
-                whatsapp_business_account_id: businessInfo.whatsapp_business_account_id
-            })
+            // Salvar todas as contas comerciais
+            for (const businessAccount of accountInfo.businessAccounts) {
+                await this.saveBusinessAccount({
+                    access_token: tokenResponse.access_token,
+                    user_id: accountInfo.user.id,
+                    user_name: accountInfo.user.name,
+                    user_email: accountInfo.user.email,
+                    business_account_id: businessAccount.id,
+                    phone_number_id: businessAccount.phone_number_id,
+                    whatsapp_business_account_id: businessAccount.whatsapp_business_account_id,
+                    display_phone_number: businessAccount.display_phone_number,
+                    business_name: businessAccount.name,
+                    whatsapp_business_account_name: businessAccount.whatsapp_business_account_name
+                })
+            }
 
-            res.json({ success: true, message: 'Business account linked successfully', data: {
-                business_account_id: businessInfo.id,
-                phone_number_id: businessInfo.phone_number_id,
-            } });
+            res.json({ 
+                success: true, 
+                message: 'Business accounts linked successfully', 
+                data: {
+                    user: accountInfo.user,
+                    businessAccounts: accountInfo.businessAccounts.map(ba => ({
+                        business_account_id: ba.id,
+                        business_name: ba.name,
+                        phone_number_id: ba.phone_number_id,
+                        display_phone_number: ba.display_phone_number,
+                        whatsapp_business_account_id: ba.whatsapp_business_account_id,
+                        whatsapp_business_account_name: ba.whatsapp_business_account_name
+                    }))
+                } 
+            });
 
         } catch (error) {
             console.error('Error processing embedded signup:', error);
@@ -144,11 +171,11 @@ class EmbeddedSignupController {
 
             console.log('✅ Token obtido com sucesso');
 
-            //console.log('\n' + '='.repeat(80));
-            //console.log('🔑 TOKEN PARA DEBUG - Copie o comando abaixo e execute:');
-            //console.log('='.repeat(80));
-            //console.log(`npm run checkWABA ${response.data.access_token}`);
-            //console.log('='.repeat(80) + '\n');
+            console.log('\n' + '='.repeat(80));
+            console.log('🔑 TOKEN PARA DEBUG - Copie o comando abaixo e execute:');
+            console.log('='.repeat(80));
+            console.log(`npm run checkWABA ${response.data.access_token}`);
+            console.log('='.repeat(80) + '\n');
 
             return {
                 success: true,
@@ -167,10 +194,24 @@ class EmbeddedSignupController {
         const base_url = 'https://graph.facebook.com/v23.0/';
 
         try {
-            console.log('🔵 Buscando informações da conta comercial...');
+            console.log('🔵 Buscando informações do usuário e contas comerciais...');
             
-            // 1. Buscar as contas comerciais do cliente
-            console.log('🔍 Buscando contas comerciais do cliente...');
+            // 1. Buscar informações do usuário
+            console.log('🔍 Buscando informações do usuário...');
+            const userResponse = await axios.get(`${base_url}me`, {
+                ...this.axiosConfig,
+                params: {
+                    fields: 'id,name,email',
+                    access_token: accessToken
+                },
+                timeout: 30000
+            });
+
+            const user = userResponse.data;
+            console.log('✅ Usuário encontrado:', user.name, '(ID:', user.id + ')');
+
+            // 2. Buscar as contas comerciais do usuário
+            console.log('🔍 Buscando contas comerciais do usuário...');
             const businessResponse = await axios.get(`${base_url}me/businesses`, {
                 ...this.axiosConfig,
                 headers: {
@@ -180,14 +221,15 @@ class EmbeddedSignupController {
             });
 
             if (!businessResponse.data.data || businessResponse.data.data.length === 0) {
-                throw new Error('Nenhuma conta comercial encontrada para este cliente');
+                throw new Error('Nenhuma conta comercial encontrada para este usuário');
             }
 
-            const business = businessResponse.data.data[0];
-            console.log('✅ Conta comercial do cliente encontrada:', business.name, '(ID:', business.id + ')');
+            const businesses = businessResponse.data.data;
+            console.log('✅ Contas comerciais encontradas:', businesses.length);
 
-            // 2. Método 1: Tentar buscar WABAs via /me/whatsapp_business_accounts
+            // 3. Método 1: Tentar buscar WABAs via /me/whatsapp_business_accounts
             console.log('🔍 Tentando buscar WABAs via /me...');
+            let wabas = [];
             try {
                 const response = await axios.get(`${base_url}me/`, {
                     ...this.axiosConfig,
@@ -198,11 +240,10 @@ class EmbeddedSignupController {
                     timeout: 30000
                 });
 
-                const wabas = response.data.whatsapp_business_accounts?.data || [];
+                wabas = response.data.whatsapp_business_accounts?.data || [];
 
                 if (wabas.length > 0) {
                     console.log('✅ WABAs encontradas via /me:', wabas.length);
-                    return await this.findWabaWithPhone(wabas, accessToken, base_url);
                 } else {
                     console.log('⚠️ Nenhuma WABA encontrada via /me, tentando fallback...');
                 }
@@ -210,42 +251,61 @@ class EmbeddedSignupController {
                 console.log('⚠️ Erro ao buscar WABAs via /me:', error.response?.data || error.message);
             }
 
-            // 3. Método 2: Fallback via debug_token
-            console.log('🔄 Usando debug_token como fallback...');
-            const debugResponse = await axios.get(`${base_url}debug_token`, {
-                ...this.axiosConfig,
-                params: {
-                    input_token: accessToken,
-                    access_token: `${process.env.WHATSAPP_APP_ID || whatsappConfig.whatsappAppId}|${process.env.WHATSAPP_APP_SECRET || whatsappConfig.whatsappAppSecret}`
-                },
-                timeout: 30000
-            });
+            // 4. Método 2: Fallback via debug_token se necessário
+            if (wabas.length === 0) {
+                console.log('🔄 Usando debug_token como fallback...');
+                const debugResponse = await axios.get(`${base_url}debug_token`, {
+                    ...this.axiosConfig,
+                    params: {
+                        input_token: accessToken,
+                        access_token: `${process.env.WHATSAPP_APP_ID || whatsappConfig.whatsappAppId}|${process.env.WHATSAPP_APP_SECRET || whatsappConfig.whatsappAppSecret}`
+                    },
+                    timeout: 30000
+                });
 
-            // ✅ CORREÇÃO: granular_scopes é um array de objetos
-            const wabaScopes = debugResponse.data.data.granular_scopes?.find(
-                s => s.scope === 'whatsapp_business_management'
-            );
+                const wabaScopes = debugResponse.data.data.granular_scopes?.find(
+                    s => s.scope === 'whatsapp_business_management'
+                );
 
-            if (!wabaScopes || !wabaScopes.target_ids || wabaScopes.target_ids.length === 0) {
-                throw new Error('Nenhuma WABA encontrada no token');
+                if (!wabaScopes || !wabaScopes.target_ids || wabaScopes.target_ids.length === 0) {
+                    throw new Error('Nenhuma WABA encontrada no token');
+                }
+
+                console.log('✅ WABAs encontradas via debug_token:', wabaScopes.target_ids.length);
+
+                wabas = await Promise.all(
+                    wabaScopes.target_ids.map(id => 
+                        axios.get(`${base_url}${id}`, {
+                            ...this.axiosConfig,
+                            params: {
+                                access_token: accessToken,
+                                fields: 'id,name,timezone_id,message_template_namespace',
+                            }
+                        }).then(response => response.data)
+                    )
+                );
             }
 
-            console.log('✅ WABAs encontradas via debug_token:', wabaScopes.target_ids.length);
+            // 5. Buscar todas as WABAs com números de telefone e associá-las às empresas corretas
+            const businessAccounts = await this.findAllWabasWithPhoneAndBusiness(wabas, businesses, accessToken, base_url);
 
-            // ✅ CORREÇÃO: adicionar return no map
-            const wabas = await Promise.all(
-                wabaScopes.target_ids.map(id => 
-                    axios.get(`${base_url}${id}`, {
-                        ...this.axiosConfig,
-                        params: {
-                            access_token: accessToken,
-                            fields: 'id,name,timezone_id,message_template_namespace',
-                        }
-                    }).then(response => response.data)
-                )
-            );
+            if (businessAccounts.length === 0) {
+                throw new Error('Nenhuma WABA com número de telefone ativo encontrada');
+            }
 
-            return await this.findWabaWithPhone(wabas, accessToken, base_url);
+            // 6. NOVO: Agrupar por empresa única (sem duplicar empresas)
+            const groupedByBusiness = this.groupByUniqueBusiness(businessAccounts);
+
+            console.log('✅ Total de empresas únicas encontradas:', groupedByBusiness.length);
+
+            return {
+                user: {
+                    id: user.id,
+                    name: user.name,
+                    email: user.email
+                },
+                businessAccounts: groupedByBusiness
+            };
             
         } catch (error) {
             console.error('❌ Erro ao buscar informações da conta:', error.response?.data || error.message);
@@ -253,7 +313,54 @@ class EmbeddedSignupController {
         }
     }
 
-    async findWabaWithPhone(wabas, accessToken, base_url) {
+    /**
+     * NOVO: Busca empresa real de cada WABA via API reversa
+     */
+    async findBusinessForWaba(wabaId, accessToken, base_url) {
+        try {
+            // Buscar informações detalhadas da WABA incluindo owned_by
+            const wabaResponse = await axios.get(`${base_url}${wabaId}`, {
+                ...this.axiosConfig,
+                params: {
+                    fields: 'id,name,owner_business_info',
+                    access_token: accessToken
+                },
+                timeout: 30000
+            });
+
+            const ownerBusinessInfo = wabaResponse.data.owner_business_info;
+            
+            if (ownerBusinessInfo && ownerBusinessInfo.id) {
+                console.log(`✅ WABA ${wabaId} pertence à empresa ID: ${ownerBusinessInfo.id}`);
+                
+                // Buscar detalhes da empresa
+                try {
+                    const businessResponse = await axios.get(`${base_url}${ownerBusinessInfo.id}`, {
+                        ...this.axiosConfig,
+                        params: {
+                            fields: 'id,name',
+                            access_token: accessToken
+                        },
+                        timeout: 30000
+                    });
+                    
+                    return businessResponse.data;
+                } catch (error) {
+                    console.log(`⚠️ Não foi possível buscar detalhes da empresa ${ownerBusinessInfo.id}`);
+                    return { id: ownerBusinessInfo.id, name: ownerBusinessInfo.name || 'Empresa sem nome' };
+                }
+            }
+            
+            return null;
+        } catch (error) {
+            console.log(`⚠️ Erro ao buscar empresa dona da WABA ${wabaId}:`, error.response?.data || error.message);
+            return null;
+        }
+    }
+
+    async findAllWabasWithPhoneAndBusiness(wabas, businesses, accessToken, base_url) {
+        const businessAccountsMap = new Map(); // Usar Map para agrupar por empresa
+
         for (const waba of wabas) {
             try {
                 console.log(`🔍 Verificando WABA: ${waba.name} (ID: ${waba.id})...`);
@@ -265,39 +372,88 @@ class EmbeddedSignupController {
                     },
                     timeout: 30000
                 });
-                
-
-                const businessResponse = await axios.get(`${base_url}me/businesses`, {
-                    ...this.axiosConfig,
-                    headers: {
-                        Authorization: `Bearer ${accessToken}`
-                    },
-                    timeout: 30000
-                });
-
-                const business = businessResponse.data.data[0];
 
                 const phoneNumbers = phoneResponse.data.data || [];
 
-                if (phoneNumbers.length > 0) {
-                    console.log(`✅ WABA válida encontrada: ${waba.name} com número ${phoneNumbers[0].display_phone_number}`);
-                    return {
-                        id: business.id,
-                        name: business.name,
+                if (phoneNumbers.length === 0) {
+                    console.log(`⚠️ WABA ${waba.name} não possui números de telefone`);
+                    continue;
+                }
+
+                // NOVO: Buscar empresa real desta WABA via API
+                let associatedBusiness = await this.findBusinessForWaba(waba.id, accessToken, base_url);
+                
+                // Se não encontrou via API, tentar nas empresas do usuário
+                if (!associatedBusiness) {
+                    console.log(`🔄 Buscando WABA ${waba.name} nas empresas do usuário...`);
+                    associatedBusiness = businesses.find(b => b.id === waba.business_id);
+                }
+                
+                // Se ainda não encontrou, usar primeira empresa como último recurso
+                if (!associatedBusiness && businesses.length > 0) {
+                    console.log(`⚠️ WABA ${waba.name} não tem empresa associada, usando primeira empresa como fallback`);
+                    associatedBusiness = businesses[0];
+                }
+
+                if (!associatedBusiness) {
+                    console.log(`❌ Não foi possível associar WABA ${waba.name} a nenhuma empresa`);
+                    continue;
+                }
+
+                console.log(`✅ WABA ${waba.name} associada à empresa: ${associatedBusiness.name}`);
+
+                // Agrupar números por empresa
+                for (const phone of phoneNumbers) {
+                    const businessKey = associatedBusiness.id;
+                    
+                    if (!businessAccountsMap.has(businessKey)) {
+                        businessAccountsMap.set(businessKey, {
+                            id: associatedBusiness.id,
+                            name: associatedBusiness.name,
+                            wabas: []
+                        });
+                    }
+                    
+                    businessAccountsMap.get(businessKey).wabas.push({
                         whatsapp_business_account_id: waba.id,
                         whatsapp_business_account_name: waba.name,
-                        phone_number_id: phoneNumbers[0].id,
-                        display_phone_number: phoneNumbers[0].display_phone_number
-                    };
-                } else {
-                    console.log(`⚠️ WABA ${waba.name} não possui números de telefone`);
+                        phone_number_id: phone.id,
+                        display_phone_number: phone.display_phone_number
+                    });
                 }
             } catch (error) {
                 console.error(`❌ Erro ao verificar WABA ${waba.id}:`, error.response?.data || error.message);
             }
         }
         
-        throw new Error('Nenhuma WABA com número de telefone ativo encontrada');
+        // Converter Map para array
+        return Array.from(businessAccountsMap.values());
+    }
+
+    /**
+     * NOVO: Agrupa WABAs por empresa única
+     * Cada empresa aparece apenas uma vez com todos seus números
+     */
+    groupByUniqueBusiness(businessAccounts) {
+        const uniqueBusinesses = [];
+        const businessMap = new Map();
+
+        for (const account of businessAccounts) {
+            if (!businessMap.has(account.id)) {
+                businessMap.set(account.id, {
+                    id: account.id,
+                    name: account.name,
+                    wabas: [...account.wabas] // Copiar array de WABAs
+                });
+                uniqueBusinesses.push(businessMap.get(account.id));
+            } else {
+                // Se a empresa já existe, adicionar as WABAs dela
+                const existing = businessMap.get(account.id);
+                existing.wabas.push(...account.wabas);
+            }
+        }
+
+        return uniqueBusinesses;
     }
 
     async saveBusinessAccount(accountData) {
@@ -326,7 +482,11 @@ class EmbeddedSignupController {
             }
         }
 
-        const existingIndex = accounts.findIndex(acc => acc.business_account_id === accountData.business_account_id);
+        const existingIndex = accounts.findIndex(acc => 
+            acc.business_account_id === accountData.business_account_id && 
+            acc.whatsapp_business_account_id === accountData.whatsapp_business_account_id
+        );
+        
         if (existingIndex >= 0) {
             accounts[existingIndex] = {...accounts[existingIndex], ...accountData, updated_at: new Date().toISOString()};
             console.log('✅ Conta atualizada');
@@ -344,12 +504,41 @@ class EmbeddedSignupController {
 
         console.log('🔑 Gerando token JWT para o usuário');
         
+        // Transformar estrutura de wabas para formato mais simples
+        const businessAccountsForToken = userData.businessAccounts.map(business => {
+            // Se a empresa tem apenas um número, usar estrutura simples
+            if (business.wabas && business.wabas.length === 1) {
+                const waba = business.wabas[0];
+                return {
+                    businessAccountId: business.id,
+                    businessName: business.name,
+                    phoneNumberId: waba.phone_number_id,
+                    displayPhoneNumber: waba.display_phone_number,
+                    wabaId: waba.whatsapp_business_account_id,
+                    wabaName: waba.whatsapp_business_account_name
+                };
+            }
+            
+            // Se tem múltiplos números, usar o primeiro mas indicar que tem mais
+            const firstWaba = business.wabas[0];
+            return {
+                businessAccountId: business.id,
+                businessName: business.name,
+                phoneNumberId: firstWaba.phone_number_id,
+                displayPhoneNumber: firstWaba.display_phone_number,
+                wabaId: firstWaba.whatsapp_business_account_id,
+                wabaName: firstWaba.whatsapp_business_account_name,
+                hasMultipleNumbers: business.wabas.length > 1,
+                totalNumbers: business.wabas.length
+            };
+        });
+
         return jwt.sign(
             {
-                id: userData.businessAccountId,
-                name: userData.name,
-                phoneNumberId: userData.phoneNumberId,
-                displayPhoneNumber: userData.displayPhoneNumber,
+                id: userData.userId,
+                name: userData.userName,
+                email: userData.userEmail,
+                businessAccounts: businessAccountsForToken,
                 apiType: 'meta'
             },
             secret,
